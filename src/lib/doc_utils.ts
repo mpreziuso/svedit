@@ -247,23 +247,46 @@ export function validate_document_schema(document_schema: DocumentSchema): void 
 					}
 				}
 			}
+			if (prop_def.type === 'node_array' && 'inline_types' in prop_def) {
+				throw new Error(
+					`Node type "${node_type}" property "${prop_name}" must not define inline_types. Inline nodes are only supported in text properties.`
+				);
+			}
+			if (prop_def.type === 'text') {
+				const invalid_inline_types = (prop_def.inline_types ?? []).filter(
+					(ref_type) => document_schema[ref_type]?.kind !== 'inline'
+				);
+				if (invalid_inline_types.length > 0) {
+					throw new Error(
+						`Node type "${node_type}" property "${prop_name}" inline_types must reference node types of kind 'inline', got: ${invalid_inline_types.join(', ')}.`
+					);
+				}
+			}
 		}
 	}
 }
 
 /**
- * Validate that no annotation node type has a registered component.
+ * Validate component registration per node kind.
  *
  * Marks render in-place via components; annotations are data-only overlay
  * ranges that must be interpreted by the app (via CSS classes or props).
+ * Inline nodes render no text of their own, so a missing component would
+ * make their content invisible rather than merely unstyled.
  *
- * @throws {Error} Throws if a kind 'annotation' type has a registered component
+ * @throws {Error} Throws if a kind 'annotation' type has a registered
+ * component, or a kind 'inline' type has none
  */
 export function validate_config_components(schema: DocumentSchema, config: SessionConfig): void {
 	for (const [node_type, node_schema] of Object.entries(schema)) {
 		if (node_schema.kind === 'annotation' && config?.node_components?.[node_type]) {
 			throw new Error(
 				`Annotation type "${node_type}" must not have a registered component. Annotations are data-only; use kind 'mark' for in-place rendered ranges.`
+			);
+		}
+		if (node_schema.kind === 'inline' && !config?.node_components?.[node_type]) {
+			throw new Error(
+				`Inline node type "${node_type}" must have a registered component. Inline nodes render no text of their own, so without a component their content would be invisible.`
 			);
 		}
 	}
@@ -375,21 +398,41 @@ function validate_marks_and_annotations(
 	node_id: string,
 	prop_name: string,
 	value: { marks: Array<Mark>; annotations: Array<Annotation> },
-	prop_def: { mark_types?: string[]; annotation_types?: string[] },
+	prop_def: { mark_types?: string[]; annotation_types?: string[]; inline_types?: string[] },
 	container_length: number,
 	all_nodes: Record<string, DocumentNode>,
 	require_references: boolean
 ): void {
+	// Inline node attachments live in `marks` so they inherit exclusivity and
+	// range adjustment, but they are declared in their own schema list.
+	const allowed_mark_types =
+		prop_def.mark_types || prop_def.inline_types
+			? [...(prop_def.mark_types ?? []), ...(prop_def.inline_types ?? [])]
+			: undefined;
+
 	validate_range_array(
 		node_id,
 		prop_name,
 		'mark',
 		value.marks,
 		container_length,
-		prop_def.mark_types,
+		allowed_mark_types,
 		all_nodes,
 		require_references
 	);
+
+	for (const range of value.marks) {
+		const referenced_node = all_nodes[range.node_id];
+		if (!referenced_node) continue;
+		if (
+			prop_def.inline_types?.includes(referenced_node.type) &&
+			range.end_offset !== range.start_offset + 1
+		) {
+			throw new Error(
+				`Node ${node_id} property ${prop_name} inline node ${range.node_id} must span exactly one character, got ${range.start_offset}-${range.end_offset}.`
+			);
+		}
+	}
 
 	if (!are_ranges_exclusive(value.marks, container_length)) {
 		throw new Error(

@@ -169,6 +169,23 @@ export function char_to_utf16_offset(str: string, char_offset: number): number {
 }
 
 /**
+ * The single character an inline node occupies in a text property's content
+ * string. U+FFFC OBJECT REPLACEMENT CHARACTER is the codepoint Unicode
+ * defines for "an object is embedded here", so it can never be confused with
+ * text the user typed.
+ */
+export const INLINE_NODE_PLACEHOLDER = '\uFFFC';
+
+/**
+ * Removes inline node placeholders from a plain text string. Used when
+ * exporting to other applications, where a bare U+FFFC renders as a
+ * replacement box.
+ */
+export function strip_inline_node_placeholders(text: string): string {
+	return text.replaceAll(INLINE_NODE_PLACEHOLDER, '');
+}
+
+/**
  * Splits a text value at the specified character position.
  *
  * Marks and annotations that span the split point will be divided
