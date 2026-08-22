@@ -1,10 +1,5 @@
 import Transaction from './Transaction.svelte.js';
-import {
-	char_slice,
-	traverse,
-	traverse_ids,
-	strip_inline_node_placeholders
-} from './utils.js';
+import { char_slice, traverse, traverse_ids, strip_inline_node_placeholders } from './utils.js';
 import {
 	get as doc_get,
 	property_type as doc_property_type,

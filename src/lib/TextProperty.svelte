@@ -149,8 +149,7 @@
 		const range = get_selection_range(selection);
 		if (!range) return false;
 		return (
-			range.start_offset <= fragment.start_offset &&
-			range.end_offset >= fragment.start_offset + 1
+			range.start_offset <= fragment.start_offset && range.end_offset >= fragment.start_offset + 1
 		);
 	}
 </script>
@@ -194,7 +193,8 @@
 				class="svedit-inline-node"
 				class:selected={inline_selected}
 				style="anchor-name: --{serialize_path(inline_path)}"
-			><InlineComponent path={inline_path} selected={inline_selected} /></span>
+				><InlineComponent path={inline_path} selected={inline_selected} /></span
+			>
 		{/if}
 	{/each}<!--
   -->{#if !is_focused || !is_empty}<br />{/if}
