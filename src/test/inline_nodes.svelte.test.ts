@@ -106,3 +106,106 @@ describe('inline node schema validation', () => {
 		);
 	});
 });
+
+describe('insert_inline_node', () => {
+	function select(session: any, anchor_offset: number, focus_offset: number) {
+		session.selection = {
+			type: 'text',
+			path: description_path,
+			anchor_offset,
+			focus_offset
+		};
+	}
+
+	it('inserts a placeholder, a one-character mark and leaves the caret after it', () => {
+		const session = create_inline_session();
+		select(session, 5, 5);
+		session.apply(session.tr.insert_inline_node('mention', { user_id: 'johannes' }));
+
+		const value = session.get(description_path);
+		expect(value.content.slice(5, 6)).toBe(INLINE_NODE_PLACEHOLDER);
+		expect(value.marks).toHaveLength(1);
+		expect(value.marks[0].start_offset).toBe(5);
+		expect(value.marks[0].end_offset).toBe(6);
+		expect(session.get(value.marks[0].node_id).user_id).toBe('johannes');
+		expect(session.selection).toMatchObject({ anchor_offset: 6, focus_offset: 6 });
+	});
+
+	it('replaces a non-collapsed selection', () => {
+		const session = create_inline_session();
+		const original = session.get(description_path).content;
+		select(session, 0, 5);
+		session.apply(session.tr.insert_inline_node('mention', { user_id: 'johannes' }));
+
+		const value = session.get(description_path);
+		expect(value.content).toBe(INLINE_NODE_PLACEHOLDER + original.slice(5));
+		expect(value.marks[0]).toMatchObject({ start_offset: 0, end_offset: 1 });
+	});
+
+	it('refuses an inline type that is not declared on the property', () => {
+		const session = create_inline_session();
+		select(session, 5, 5);
+		session.apply(session.tr.insert_inline_node('ticker', { symbol: 'AAPL' }));
+		expect(session.get(description_path).marks).toHaveLength(0);
+	});
+
+	it('refuses to insert inside an existing mark', () => {
+		const session = create_inline_session();
+		select(session, 0, 10);
+		session.apply(session.tr.toggle_mark('strong'));
+		select(session, 5, 5);
+		session.apply(session.tr.insert_inline_node('mention', { user_id: 'johannes' }));
+
+		const value = session.get(description_path);
+		expect(value.marks).toHaveLength(1);
+		expect(session.get(value.marks[0].node_id).type).toBe('strong');
+	});
+
+	it('keeps the attachment on the right character when typing around it', () => {
+		const session = create_inline_session();
+		select(session, 5, 5);
+		session.apply(session.tr.insert_inline_node('mention', { user_id: 'johannes' }));
+
+		// Typing before it shifts the attachment along.
+		select(session, 0, 0);
+		session.apply(session.tr.insert_text('ab'));
+		expect(session.get(description_path).marks[0]).toMatchObject({
+			start_offset: 7,
+			end_offset: 8
+		});
+
+		// Typing at its trailing edge stays outside it.
+		select(session, 8, 8);
+		session.apply(session.tr.insert_text('cd'));
+		expect(session.get(description_path).marks[0]).toMatchObject({
+			start_offset: 7,
+			end_offset: 8
+		});
+	});
+
+	it('deletes the payload node when its character is deleted', () => {
+		const session = create_inline_session();
+		select(session, 5, 5);
+		session.apply(session.tr.insert_inline_node('mention', { user_id: 'johannes' }));
+		const mention_id = session.get(description_path).marks[0].node_id;
+
+		select(session, 6, 6);
+		session.apply(session.tr.delete_selection('backward'));
+
+		expect(session.get(description_path).marks).toHaveLength(0);
+		expect(session.get(mention_id)).toBeUndefined();
+	});
+
+	it('reports available inline types for the current selection', () => {
+		const session = create_inline_session();
+		select(session, 5, 5);
+		expect(session.available_inline_types).toEqual(['mention']);
+		session.selection = {
+			type: 'text',
+			path: ['story_1', 'title'],
+			anchor_offset: 0,
+			focus_offset: 0
+		};
+		expect(session.available_inline_types).toEqual([]);
+	});
+});

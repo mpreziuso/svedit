@@ -73,6 +73,7 @@ export default class Session<S extends DocumentSchema = DocumentSchema> {
 	selected_node: AnyNode<S> | null = $derived(this.get_selected_node());
 	available_mark_types = $derived(this.get_available_mark_types());
 	available_annotation_types = $derived(this.get_available_annotation_types());
+	available_inline_types = $derived(this.get_available_inline_types());
 	selected_marks = $derived(get_selected_marks(this.schema, this.doc, this.selection));
 	active_mark: SelectedAttachment | null = $derived(
 		this.selected_marks.length === 1 ? this.selected_marks[0] : null
@@ -223,6 +224,12 @@ export default class Session<S extends DocumentSchema = DocumentSchema> {
 		if (this.selection?.type !== 'text' && this.selection?.type !== 'node') return [];
 		const property_definition = this.inspect(this.selection.path);
 		return property_definition.annotation_types || [];
+	}
+
+	get_available_inline_types(): string[] {
+		if (this.selection?.type !== 'text') return [];
+		const property_definition = this.inspect(this.selection.path);
+		return property_definition.inline_types || [];
 	}
 
 	// Helper function to get the currently selected node

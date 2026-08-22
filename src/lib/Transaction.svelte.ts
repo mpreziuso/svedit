@@ -7,7 +7,8 @@ import {
 	is_selection_collapsed,
 	adjust_ranges_for_deletion,
 	adjust_ranges_for_insertion,
-	are_ranges_exclusive
+	are_ranges_exclusive,
+	INLINE_NODE_PLACEHOLDER
 } from './utils.js';
 import { join_text_node } from './transforms.svelte.js';
 import {
@@ -43,7 +44,8 @@ import type {
 	DocumentOperation,
 	DynamicRecord,
 	Inspection,
-	SessionConfig
+	SessionConfig,
+	TextSelection
 } from './types.js';
 
 /**
@@ -204,6 +206,18 @@ export default class Transaction {
 		if (this.selection?.type !== 'text' && this.selection?.type !== 'node') return [];
 		const property_definition = this.inspect(this.selection.path);
 		return property_definition.annotation_types || [];
+	}
+
+	/**
+	 * Gets the inline node types available for the current text selection.
+	 *
+	 * Inline nodes are only supported in text properties, so a node selection
+	 * never offers any.
+	 */
+	get available_inline_types(): string[] {
+		if (this.selection?.type !== 'text') return [];
+		const property_definition = this.inspect(this.selection.path);
+		return property_definition.inline_types || [];
 	}
 
 	/**
@@ -618,6 +632,69 @@ export default class Transaction {
 	}
 
 	/**
+	 * Inserts an inline node at the current text selection.
+	 *
+	 * An inline node occupies exactly one placeholder character in the content
+	 * string, with its payload node attached as a one-character mark. That
+	 * placeholder is what makes it atomic: `adjust_ranges_for_insertion` keeps
+	 * insertions at either edge outside the range, so text can never be typed
+	 * into it, and deleting the character disposes of the payload node through
+	 * the normal reference-counted path.
+	 *
+	 * @param inline_type - The node type to insert (e.g. 'mention', 'ticker')
+	 * @param properties - Additional data for the payload node
+	 * @returns This transaction instance for method chaining
+	 *
+	 * @example
+	 * ```js
+	 * tr.insert_inline_node('mention', { user_id: 'johannes' });
+	 * ```
+	 */
+	insert_inline_node(inline_type: string, properties?: DynamicRecord): this {
+		if (this.selection?.type !== 'text') return this;
+		if (!this.available_inline_types.includes(inline_type)) {
+			console.warn(`Inline node type ${inline_type} is not allowed here.`);
+			return this;
+		}
+
+		if (!is_selection_collapsed(this.selection)) {
+			this.delete_selection();
+		}
+
+		// A mark that strictly contains the caret would end up overlapping the
+		// inline node's own mark, and marks must stay mutually exclusive. At a
+		// collapsed caret selected_marks is non-empty only for a strictly
+		// containing mark, which is exactly the case we must refuse.
+		if (this.selected_marks.length > 0) {
+			console.warn(
+				'Cannot insert an inline node inside an existing mark. Place the caret outside the mark instead.'
+			);
+			return this;
+		}
+
+		const path = this.selection.path;
+		const start_offset = (this.selection as TextSelection).anchor_offset;
+
+		this.insert_text(INLINE_NODE_PLACEHOLDER);
+
+		const inline_node = {
+			id: this.generate_id(),
+			type: inline_type,
+			...properties
+		};
+		this.create(inline_node);
+
+		const text_value = structuredClone($state.snapshot(this.get(path)));
+		text_value.marks = [
+			...text_value.marks,
+			{ start_offset, end_offset: start_offset + 1, node_id: inline_node.id }
+		];
+		this.set(path, text_value);
+
+		return this;
+	}
+
+	/**
 	 * Deletes the currently selected text, node, or property.
 	 *
 	 * Behavior depends on selection type:
@@ -901,6 +978,11 @@ export default class Transaction {
 		this.selection = new_selection;
 
 		const text_property_definition = this.inspect(this.selection.path);
+		// Inline node attachments travel in `marks` too, so both lists are allowed.
+		const allowed_mark_types = [
+			...(text_property_definition.mark_types ?? []),
+			...(text_property_definition.inline_types ?? [])
+		];
 		const next_text = structuredClone(text_value);
 		let text_changed = false;
 
@@ -910,7 +992,7 @@ export default class Transaction {
 			const restored_marks = marks
 				.map((mark) => {
 					const original_mark_node = nodes[mark.node_id];
-					if (text_property_definition.mark_types?.includes(original_mark_node?.type)) {
+					if (allowed_mark_types.includes(original_mark_node?.type)) {
 						const new_mark_node_id = this.build(mark.node_id, nodes);
 						return {
 							start_offset: range.start_offset + mark.start_offset,
