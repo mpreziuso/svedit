@@ -267,3 +267,114 @@ describe('inline node rendering', () => {
 		expect(inline_el().classList.contains('selected')).toBe(true);
 	});
 });
+
+describe('selection mapping, DOM to model', () => {
+	const rendered_description_path = ['page_1', 'body', 0, 'description'];
+	const text_selector = '[data-type="text"][data-path="page_1__body__0__description"]';
+
+	async function render_and_focus(with_mention: boolean) {
+		const session = create_inline_session();
+		if (with_mention) {
+			session.selection = {
+				type: 'text',
+				path: description_path,
+				anchor_offset: 5,
+				focus_offset: 5
+			};
+			session.apply(session.tr.insert_inline_node('mention', { user_id: 'johannes' }));
+		}
+		const { container } = render(SveditTest, { session });
+		await tick();
+		const canvas = container.querySelector<HTMLElement>('.svedit-canvas')!;
+		canvas.focus();
+		// The test window never holds OS focus, so Chrome does not deliver the
+		// focus event. Dispatch it so canvas_focused flips as it would for a
+		// real user — without this onselectionchange bails at its guard.
+		canvas.dispatchEvent(new FocusEvent('focus'));
+		await tick();
+		return { session, container };
+	}
+
+	/** Places a DOM selection and lets Svedit map it back into the model. */
+	async function set_dom_selection(
+		start_container: Node,
+		start_offset: number,
+		end_container: Node,
+		end_offset: number
+	) {
+		const range = document.createRange();
+		range.setStart(start_container, start_offset);
+		range.setEnd(end_container, end_offset);
+		window.getSelection()?.removeAllRanges();
+		window.getSelection()?.addRange(range);
+		document.dispatchEvent(new Event('selectionchange'));
+		await tick();
+		await new Promise((resolve) => setTimeout(resolve, 10));
+	}
+
+	function inline_position(container: HTMLElement) {
+		const text_el = container.querySelector<HTMLElement>(text_selector)!;
+		const inline_el = text_el.querySelector<HTMLElement>('[data-type="inline-node"]')!;
+		const parent = inline_el.parentNode!;
+		const index = Array.prototype.indexOf.call(parent.childNodes, inline_el);
+		return { text_el, inline_el, parent, index };
+	}
+
+	it('counts an inline node as one character, not as its rendered text', async () => {
+		const { session, container } = await render_and_focus(true);
+		const { parent, index } = inline_position(container);
+
+		// A caret immediately after the chip. The chip renders '@johannes'
+		// (9 characters) but occupies exactly 1 in the model, so without the
+		// correction this would map to offset 14 instead of 6.
+		await set_dom_selection(parent, index + 1, parent, index + 1);
+
+		expect(session.selection).toMatchObject({
+			type: 'text',
+			path: rendered_description_path,
+			anchor_offset: 6,
+			focus_offset: 6
+		});
+	});
+
+	it('maps a caret placed before the inline node', async () => {
+		const { session, container } = await render_and_focus(true);
+		const { parent, index } = inline_position(container);
+
+		await set_dom_selection(parent, index, parent, index);
+
+		expect(session.selection).toMatchObject({ anchor_offset: 5, focus_offset: 5 });
+	});
+
+	it('maps a selection spanning the inline node', async () => {
+		const { session, container } = await render_and_focus(true);
+		const { parent, index } = inline_position(container);
+
+		await set_dom_selection(parent, index, parent, index + 1);
+
+		expect(session.selection).toMatchObject({ anchor_offset: 5, focus_offset: 6 });
+	});
+
+	it('snaps a boundary that lands inside the inline node', async () => {
+		const { session, container } = await render_and_focus(true);
+		const { inline_el } = inline_position(container);
+		const chip_text = inline_el.querySelector('.chip')!.firstChild!;
+
+		// Browsers can drop a boundary inside a contenteditable=false subtree.
+		// The model has no positions in there, so it must snap to an edge.
+		await set_dom_selection(chip_text, 3, chip_text, 3);
+
+		expect(session.selection).toMatchObject({ anchor_offset: 6, focus_offset: 6 });
+	});
+
+	it('maps text with no inline nodes exactly as before', async () => {
+		const { session, container } = await render_and_focus(false);
+		const text_el = container.querySelector<HTMLElement>(text_selector)!;
+		const walker = document.createTreeWalker(text_el, NodeFilter.SHOW_TEXT);
+		const text_node = walker.nextNode()!;
+
+		await set_dom_selection(text_node, 3, text_node, 8);
+
+		expect(session.selection).toMatchObject({ anchor_offset: 3, focus_offset: 8 });
+	});
+});
