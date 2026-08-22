@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { render } from 'vitest-browser-svelte';
+import { tick } from 'svelte';
+import SveditTest from './testing_components/SveditTest.svelte';
 import create_test_session from './create_test_session.js';
 import {
 	validate_document_schema,
@@ -207,5 +210,60 @@ describe('insert_inline_node', () => {
 			focus_offset: 0
 		};
 		expect(session.available_inline_types).toEqual([]);
+	});
+});
+
+describe('inline node rendering', () => {
+	/** The story description as rendered inside page_1.body[0]. */
+	const rendered_description_path = 'page_1__body__0__description';
+
+	async function render_with_mention() {
+		const session = create_inline_session();
+		session.selection = {
+			type: 'text',
+			path: description_path,
+			anchor_offset: 5,
+			focus_offset: 5
+		};
+		session.apply(session.tr.insert_inline_node('mention', { user_id: 'johannes' }));
+		const { container } = render(SveditTest, { session });
+		await tick();
+		return { session, container };
+	}
+
+	it('renders an atomic wrapper and omits the placeholder character', async () => {
+		const { container } = await render_with_mention();
+		const text_el = container.querySelector<HTMLElement>(
+			`[data-path="${rendered_description_path}"][data-type="text"]`
+		);
+		expect(text_el).not.toBeNull();
+
+		const inline_el = text_el!.querySelector<HTMLElement>('[data-type="inline-node"]');
+		expect(inline_el).not.toBeNull();
+		expect(inline_el!.getAttribute('contenteditable')).toBe('false');
+		expect(inline_el!.dataset.offset).toBe('5');
+		expect(inline_el!.textContent).toBe('@johannes');
+
+		// The placeholder is a model-only character; it must never reach the DOM.
+		expect(text_el!.textContent).not.toContain(INLINE_NODE_PLACEHOLDER);
+	});
+
+	it('marks the wrapper as selected when the selection covers it', async () => {
+		const { session, container } = await render_with_mention();
+		const inline_el = () => container.querySelector<HTMLElement>('[data-type="inline-node"]')!;
+
+		expect(inline_el().classList.contains('selected')).toBe(false);
+
+		// Selection matching is path-based, exactly as `is_focused` already is,
+		// so the *rendered* path is what marks this instance selected. story_1
+		// is rendered twice in the test document, at body 0 and body 1.
+		session.selection = {
+			type: 'text',
+			path: ['page_1', 'body', 0, 'description'],
+			anchor_offset: 5,
+			focus_offset: 6
+		};
+		await tick();
+		expect(inline_el().classList.contains('selected')).toBe(true);
 	});
 });
