@@ -12,6 +12,13 @@ import { INLINE_NODE_PLACEHOLDER } from '../lib/utils.js';
 import InlineChip from './testing_components/InlineChip.svelte';
 
 const description_path = ['story_1', 'description'];
+/**
+ * The same property reached through the rendered document tree. Rendering
+ * tests must select through this path: `__render_text_selection` looks the
+ * element up by `data-path`, so a canonical path that is never rendered
+ * finds nothing.
+ */
+const rendered_path = ['page_1', 'body', 0, 'description'];
 
 /**
  * A session whose story description accepts a `strong` mark and a `mention`
@@ -221,7 +228,7 @@ describe('inline node rendering', () => {
 		const session = create_inline_session();
 		session.selection = {
 			type: 'text',
-			path: description_path,
+			path: rendered_path,
 			anchor_offset: 5,
 			focus_offset: 5
 		};
@@ -259,7 +266,7 @@ describe('inline node rendering', () => {
 		// is rendered twice in the test document, at body 0 and body 1.
 		session.selection = {
 			type: 'text',
-			path: ['page_1', 'body', 0, 'description'],
+			path: rendered_path,
 			anchor_offset: 5,
 			focus_offset: 6
 		};
@@ -277,7 +284,7 @@ describe('selection mapping, DOM to model', () => {
 		if (with_mention) {
 			session.selection = {
 				type: 'text',
-				path: description_path,
+				path: rendered_path,
 				anchor_offset: 5,
 				focus_offset: 5
 			};
@@ -384,7 +391,7 @@ describe('selection mapping, model to DOM', () => {
 		const session = create_inline_session();
 		session.selection = {
 			type: 'text',
-			path: description_path,
+			path: rendered_path,
 			anchor_offset: 5,
 			focus_offset: 5
 		};
@@ -466,7 +473,7 @@ describe('clicking an inline node', () => {
 		const session = create_inline_session();
 		session.selection = {
 			type: 'text',
-			path: description_path,
+			path: rendered_path,
 			anchor_offset: 5,
 			focus_offset: 5
 		};
@@ -486,5 +493,65 @@ describe('clicking an inline node', () => {
 		});
 		expect(session.selected_marks).toHaveLength(1);
 		expect(session.selected_marks[0].node.type).toBe('mention');
+	});
+});
+
+describe('clipboard export', () => {
+	it('strips the placeholder from plain text but keeps it in the model', () => {
+		const session = create_inline_session();
+		session.selection = {
+			type: 'text',
+			path: description_path,
+			anchor_offset: 5,
+			focus_offset: 5
+		};
+		session.apply(session.tr.insert_inline_node('mention', { user_id: 'johannes' }));
+
+		session.selection = {
+			type: 'text',
+			path: description_path,
+			anchor_offset: 0,
+			focus_offset: 10
+		};
+
+		// The model keeps the placeholder: it is what makes the node atomic.
+		expect(session.get_selected_text().content).toContain(INLINE_NODE_PLACEHOLDER);
+		// External plain text must not carry a replacement box.
+		expect(session.get_selected_plain_text()).not.toContain(INLINE_NODE_PLACEHOLDER);
+	});
+
+	it('round-trips an inline node through an internal copy and paste', () => {
+		const session = create_inline_session();
+		session.selection = {
+			type: 'text',
+			path: description_path,
+			anchor_offset: 5,
+			focus_offset: 5
+		};
+		session.apply(session.tr.insert_inline_node('mention', { user_id: 'johannes' }));
+
+		session.selection = {
+			type: 'text',
+			path: description_path,
+			anchor_offset: 5,
+			focus_offset: 6
+		};
+		const copied = session.get_selected_text();
+
+		session.selection = {
+			type: 'text',
+			path: description_path,
+			anchor_offset: 0,
+			focus_offset: 0
+		};
+		session.apply(
+			session.tr.insert_text(copied.content, copied.marks, copied.annotations, copied.nodes)
+		);
+
+		const value = session.get(description_path);
+		expect(value.marks).toHaveLength(2);
+		const pasted = value.marks.find((mark: any) => mark.start_offset === 0);
+		expect(session.get(pasted.node_id).type).toBe('mention');
+		expect(session.get(pasted.node_id).user_id).toBe('johannes');
 	});
 });
