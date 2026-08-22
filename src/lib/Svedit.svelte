@@ -895,6 +895,40 @@ ${fallback_html}`;
 		}
 	}
 
+	/**
+	 * Selects an inline node when it is clicked.
+	 *
+	 * A collapsed caret is never inside a one-character range, so without this
+	 * an inline node could not be reported by `session.selected_marks` and app
+	 * UI (popovers, action overlays) would have nothing to anchor to. Chrome
+	 * already selects a contenteditable="false" element on click; Firefox and
+	 * Safari do not agree, so Svedit does it explicitly.
+	 */
+	function onpointerdown(event: PointerEvent) {
+		if (!editable) return;
+		const target = event.target instanceof Element ? event.target : null;
+		const inline_el = target?.closest<HTMLElement>('[data-type="inline-node"]');
+		if (!inline_el) return;
+
+		const text_el = inline_el.closest<HTMLElement>('[data-path][data-type="text"]');
+		if (!text_el?.dataset.path) return;
+
+		const path = deserialize_path(text_el.dataset.path);
+		if (!path) return;
+
+		const start_offset = Number(inline_el.dataset.offset);
+		if (!Number.isInteger(start_offset)) return;
+
+		event.preventDefault();
+		session.selection = {
+			type: 'text',
+			path,
+			anchor_offset: start_offset,
+			focus_offset: start_offset + 1
+		};
+		focus_canvas();
+	}
+
 	// Handle focus - push session's keymap onto stack
 	function handle_canvas_focus() {
 		// Use flushSync so highlight spans are removed from the DOM
@@ -1730,7 +1764,9 @@ ${fallback_html}`;
 		selection-change flow updates session.selection on tap, which flips
 		this attribute before iOS decides whether to show the keyboard — no
 		imperative state tracking, drag detection, or click/pointerdown
-		handlers are required for keyboard suppression.
+		handlers are required for keyboard suppression. (The pointerdown
+		handler below is unrelated: it selects an inline node on click,
+		because a collapsed caret is never inside a one-character range.)
 	-->
 	<div
 		class="svedit-canvas {css_class}"
@@ -1740,6 +1776,7 @@ ${fallback_html}`;
 		class:property-selection={session.selection?.type === 'property'}
 		bind:this={canvas_el}
 		{onbeforeinput}
+		{onpointerdown}
 		{oncompositionstart}
 		{oncompositionend}
 		onfocus={handle_canvas_focus}
