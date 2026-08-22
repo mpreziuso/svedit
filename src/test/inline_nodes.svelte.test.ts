@@ -8,7 +8,7 @@ import {
 	validate_document,
 	validate_config_components
 } from '../lib/doc_utils.js';
-import { INLINE_NODE_PLACEHOLDER } from '../lib/utils.js';
+import { INLINE_NODE_PLACEHOLDER, get_dom_model_text } from '../lib/utils.js';
 import InlineChip from './testing_components/InlineChip.svelte';
 
 const description_path = ['story_1', 'description'];
@@ -106,6 +106,21 @@ describe('inline node schema validation', () => {
 		);
 	});
 
+	it('does not narrow which marks are allowed when inline_types is added', () => {
+		const session = create_inline_session();
+		// A property with no mark_types accepts any mark; declaring inline_types
+		// must not silently turn that into "inline nodes only".
+		delete (session.schema.story.properties.description as any).mark_types;
+		const doc = doc_with_mention(3, 4) as any;
+		doc.nodes.strong_1 = { id: 'strong_1', type: 'strong' };
+		doc.nodes.story_1.description.marks.push({
+			start_offset: 0,
+			end_offset: 2,
+			node_id: 'strong_1'
+		});
+		expect(() => validate_document(doc, session.schema)).not.toThrow();
+	});
+
 	it('rejects an inline node type with no registered component', () => {
 		const session = create_inline_session();
 		delete session.config.node_components.mention;
@@ -169,6 +184,38 @@ describe('insert_inline_node', () => {
 		const value = session.get(description_path);
 		expect(value.marks).toHaveLength(1);
 		expect(session.get(value.marks[0].node_id).type).toBe('strong');
+	});
+
+	it('does not delete the selection when it refuses to insert', () => {
+		const session = create_inline_session();
+		select(session, 0, 10);
+		session.apply(session.tr.toggle_mark('strong'));
+		const content_before = session.get(description_path).content;
+
+		// Strictly inside the mark: the insert must be refused, and refusing
+		// must not destroy the selected text on the way out.
+		select(session, 3, 6);
+		session.apply(session.tr.insert_inline_node('mention', { user_id: 'johannes' }));
+
+		const value = session.get(description_path);
+		expect(value.content).toBe(content_before);
+		expect(value.marks).toHaveLength(1);
+		expect(session.get(value.marks[0].node_id).type).toBe('strong');
+	});
+
+	it('replaces a selection that exactly covers a mark', () => {
+		const session = create_inline_session();
+		select(session, 0, 10);
+		session.apply(session.tr.toggle_mark('strong'));
+
+		// The mark is consumed by the deletion, so nothing contains the caret
+		// afterwards and the insert is legal.
+		select(session, 0, 10);
+		session.apply(session.tr.insert_inline_node('mention', { user_id: 'johannes' }));
+
+		const value = session.get(description_path);
+		expect(value.marks).toHaveLength(1);
+		expect(session.get(value.marks[0].node_id).type).toBe('mention');
 	});
 
 	it('keeps the attachment on the right character when typing around it', () => {
@@ -553,5 +600,108 @@ describe('clipboard export', () => {
 		const pasted = value.marks.find((mark: any) => mark.start_offset === 0);
 		expect(session.get(pasted.node_id).type).toBe('mention');
 		expect(session.get(pasted.node_id).user_id).toBe('johannes');
+	});
+});
+
+describe('pasting an inline node where it is not allowed', () => {
+	/** Copies a single mention out of the story description. */
+	function copy_a_mention(session: any) {
+		session.selection = {
+			type: 'text',
+			path: description_path,
+			anchor_offset: 5,
+			focus_offset: 5
+		};
+		session.apply(session.tr.insert_inline_node('mention', { user_id: 'johannes' }));
+		session.selection = {
+			type: 'text',
+			path: description_path,
+			anchor_offset: 5,
+			focus_offset: 6
+		};
+		return session.get_selected_text();
+	}
+
+	it('drops the placeholder when the target property does not allow the type', () => {
+		const session = create_inline_session();
+		(session.schema.story.properties.title as any).mark_types = ['strong'];
+		const copied = copy_a_mention(session);
+
+		session.selection = {
+			type: 'text',
+			path: ['story_1', 'title'],
+			anchor_offset: 0,
+			focus_offset: 0
+		};
+		session.apply(
+			session.tr.insert_text(copied.content, copied.marks, copied.annotations, copied.nodes)
+		);
+
+		const title = session.get(['story_1', 'title']);
+		// No attachment could be restored, so no orphaned placeholder may remain.
+		expect(title.content).not.toContain(INLINE_NODE_PLACEHOLDER);
+		expect(title.marks).toHaveLength(0);
+	});
+
+	it('drops the placeholder when the attachment would land inside a mark', () => {
+		const session = create_inline_session();
+		const copied = copy_a_mention(session);
+
+		// Bold a run, then paste the mention into the middle of it.
+		session.selection = {
+			type: 'text',
+			path: description_path,
+			anchor_offset: 0,
+			focus_offset: 4
+		};
+		session.apply(session.tr.toggle_mark('strong'));
+		session.selection = {
+			type: 'text',
+			path: description_path,
+			anchor_offset: 2,
+			focus_offset: 2
+		};
+		session.apply(
+			session.tr.insert_text(copied.content, copied.marks, copied.annotations, copied.nodes)
+		);
+
+		const value = session.get(description_path);
+		const placeholders = [...value.content].filter(
+			(character) => character === INLINE_NODE_PLACEHOLDER
+		);
+		// Only the original mention's placeholder survives; the pasted one had
+		// no attachment restored and must not linger.
+		expect(placeholders).toHaveLength(1);
+		expect(
+			value.marks.filter((mark: any) => session.get(mark.node_id).type === 'mention')
+		).toHaveLength(1);
+	});
+});
+
+describe('reading DOM text as the model expresses it', () => {
+	it('counts an inline node as one placeholder character', () => {
+		const container = document.createElement('div');
+		const before = document.createTextNode('Ask ');
+		const inline_el = document.createElement('span');
+		inline_el.dataset.type = 'inline-node';
+		inline_el.innerHTML = '<span class="chip">@Johannes</span>';
+		const after = document.createTextNode(' now');
+		container.append(before, inline_el, after, document.createElement('br'));
+
+		// Raw textContent would read '@Johannes' here, which can never equal the
+		// model text and would defeat the composition cleanup's early return.
+		expect(container.textContent).toContain('@Johannes');
+		expect(get_dom_model_text(container)).toBe(`Ask ${INLINE_NODE_PLACEHOLDER} now`);
+	});
+
+	it('matches the model text for a property containing an inline node', () => {
+		const container = document.createElement('div');
+		const inline_el = document.createElement('span');
+		inline_el.dataset.type = 'inline-node';
+		inline_el.textContent = '@Johannes';
+		container.append(document.createTextNode('Hi '), inline_el);
+
+		const model_text = `Hi ${INLINE_NODE_PLACEHOLDER}`;
+		expect(get_dom_model_text(container)).toBe(model_text);
 	});
 });
