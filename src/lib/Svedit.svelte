@@ -1202,6 +1202,12 @@ ${fallback_html}`;
 
 		if (!path) return null;
 
+		// Empty for every text property without inline nodes, in which case all
+		// the correction below is skipped and mapping behaves exactly as before.
+		const inline_els = Array.from(
+			focus_root.querySelectorAll<HTMLElement>('[data-type="inline-node"]')
+		);
+
 		// EDGE CASE 1B: Caret after trailing <br> at end of text
 		//
 		// TextProperty renders a trailing <br> for non-empty or non-focused text.
@@ -1210,7 +1216,6 @@ ${fallback_html}`;
 		// We detect this and return the current DOM text length instead.
 		// During compositionend, the browser has already inserted the composed
 		// character into the DOM, while the Svedit model still has the old text.
-		const dom_text_length = get_char_length(focus_root.textContent ?? '');
 		const child_nodes = focus_root.childNodes;
 
 		if (
@@ -1235,6 +1240,9 @@ ${fallback_html}`;
 				child_nodes[last_element_index].nodeName === 'BR' &&
 				focus_offset_in_node >= last_element_index
 			) {
+				// Measured through get_text_offset so inline nodes count as one
+				// character rather than as the text their components rendered.
+				const dom_text_length = get_text_offset(focus_root, focus_root.childNodes.length);
 				return {
 					type: 'text',
 					path,
@@ -1244,11 +1252,43 @@ ${fallback_html}`;
 			}
 		}
 
+		/**
+		 * Snaps a boundary point that landed inside an atomic inline node to its
+		 * nearest edge. Browsers can place a boundary inside a
+		 * contenteditable="false" subtree, but the model has no positions in
+		 * there: the whole node is a single character.
+		 */
+		function snap_to_inline_edge(container: Node, offset: number): [Node, number] {
+			if (inline_els.length === 0) return [container, offset];
+			const element = container instanceof Element ? container : container.parentElement;
+			const inline_el = element?.closest<HTMLElement>('[data-type="inline-node"]');
+			if (!inline_el || !focus_root.contains(inline_el)) return [container, offset];
+			const parent = inline_el.parentNode;
+			if (!parent) return [container, offset];
+			const index = Array.prototype.indexOf.call(parent.childNodes, inline_el);
+			return offset === 0 ? [parent, index] : [parent, index + 1];
+		}
+
 		function get_text_offset(container: Node, offset: number): number {
+			const [snapped_container, snapped_offset] = snap_to_inline_edge(container, offset);
 			const offset_range = window.document.createRange();
 			offset_range.setStart(focus_root, 0);
-			offset_range.setEnd(container, offset);
-			return get_char_length(offset_range.toString());
+			offset_range.setEnd(snapped_container, snapped_offset);
+			let length = get_char_length(offset_range.toString());
+
+			// An inline node renders arbitrary content but occupies exactly one
+			// character in the model. For each one lying wholly within the
+			// measured span, swap its rendered length for that single character.
+			for (const el of inline_els) {
+				const probe = window.document.createRange();
+				probe.setStart(focus_root, 0);
+				probe.setEndAfter(el);
+				if (offset_range.compareBoundaryPoints(Range.END_TO_END, probe) >= 0) {
+					length += 1 - get_char_length(el.textContent ?? '');
+				}
+			}
+
+			return length;
 		}
 
 		const start_offset = get_text_offset(range.startContainer, range.startOffset);
