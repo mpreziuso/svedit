@@ -378,3 +378,85 @@ describe('selection mapping, DOM to model', () => {
 		expect(session.selection).toMatchObject({ anchor_offset: 3, focus_offset: 8 });
 	});
 });
+
+describe('selection mapping, model to DOM', () => {
+	async function render_with_mention() {
+		const session = create_inline_session();
+		session.selection = {
+			type: 'text',
+			path: description_path,
+			anchor_offset: 5,
+			focus_offset: 5
+		};
+		session.apply(session.tr.insert_inline_node('mention', { user_id: 'johannes' }));
+		const { container } = render(SveditTest, { session });
+		await tick();
+		const canvas = container.querySelector<HTMLElement>('.svedit-canvas')!;
+		canvas.focus();
+		// The test window never holds OS focus, so Chrome does not deliver the
+		// focus event. Dispatch it so canvas_focused flips as it would for a
+		// real user — without this onselectionchange bails at its guard.
+		canvas.dispatchEvent(new FocusEvent('focus'));
+		await tick();
+		return { session, container };
+	}
+
+	async function apply_selection(session: any, anchor_offset: number, focus_offset: number) {
+		session.selection = {
+			type: 'text',
+			path: ['page_1', 'body', 0, 'description'],
+			anchor_offset,
+			focus_offset
+		};
+		await tick();
+		await new Promise((resolve) => setTimeout(resolve, 10));
+	}
+
+	it('renders a selection covering the inline node', async () => {
+		const { session, container } = await render_with_mention();
+		await apply_selection(session, 5, 6);
+
+		const dom_selection = window.getSelection()!;
+		expect(dom_selection.isCollapsed).toBe(false);
+
+		// The DOM range must wrap the whole wrapper element. Note we cannot
+		// assert on dom_selection.toString(): Chrome excludes user-select:none
+		// subtrees from a selection's string, so the chip contributes nothing
+		// to it. That is also why TextProperty passes a `selected` prop —
+		// the native selection paint never reaches the chip.
+		const inline_el = container.querySelector<HTMLElement>('[data-type="inline-node"]')!;
+		const dom_range = dom_selection.getRangeAt(0);
+		expect(dom_range.intersectsNode(inline_el)).toBe(true);
+
+		// Containment, not exact equality: at a seam the preceding text node
+		// claims the boundary first, so the range starts at the end of that
+		// text node rather than at (parent, index). Those are adjacent
+		// positions, and a caret inside text behaves better than one between
+		// elements, so this is intended.
+		const wrapping = document.createRange();
+		wrapping.selectNode(inline_el);
+		expect(dom_range.compareBoundaryPoints(Range.START_TO_START, wrapping)).toBeLessThanOrEqual(0);
+		expect(dom_range.compareBoundaryPoints(Range.END_TO_END, wrapping)).toBeGreaterThanOrEqual(0);
+	});
+
+	it('renders a caret at the trailing edge of the inline node', async () => {
+		const { session } = await render_with_mention();
+		await apply_selection(session, 6, 6);
+
+		const dom_selection = window.getSelection()!;
+		expect(dom_selection.isCollapsed).toBe(true);
+		expect(dom_selection.type).toBe('Caret');
+	});
+
+	it('round-trips a selection that spans the inline node and text', async () => {
+		const { session } = await render_with_mention();
+		await apply_selection(session, 3, 8);
+
+		// Re-derive the model selection from what was just rendered.
+		document.dispatchEvent(new Event('selectionchange'));
+		await tick();
+		await new Promise((resolve) => setTimeout(resolve, 10));
+
+		expect(session.selection).toMatchObject({ anchor_offset: 3, focus_offset: 8 });
+	});
+});

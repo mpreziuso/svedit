@@ -1525,6 +1525,42 @@ ${fallback_html}`;
 				}
 				current_offset += node_char_length;
 			} else if (node instanceof HTMLElement) {
+				if (node.dataset.type === 'inline-node') {
+					// An inline node is exactly one model character. The caret can
+					// only sit before or after it, so positions resolve against
+					// its parent rather than anywhere inside it.
+					const parent = node.parentNode as HTMLElement | null;
+					if (!parent) return false;
+					const index = Array.prototype.indexOf.call(parent.childNodes, node);
+					const resolve = (target_offset: number) =>
+						target_offset <= current_offset ? index : index + 1;
+
+					if (is_backward) {
+						if (!focus_node && current_offset + 1 >= start_offset) {
+							focus_node = parent;
+							focus_node_offset = resolve(start_offset);
+						}
+						if (!anchor_node && current_offset + 1 >= end_offset) {
+							anchor_node = parent;
+							anchor_node_offset = resolve(end_offset);
+							return true; // Stop iteration
+						}
+					} else {
+						if (!anchor_node && current_offset + 1 >= start_offset) {
+							anchor_node = parent;
+							anchor_node_offset = resolve(start_offset);
+						}
+						if (!focus_node && current_offset + 1 >= end_offset) {
+							focus_node = parent;
+							focus_node_offset = resolve(end_offset);
+							return true; // Stop iteration
+						}
+					}
+
+					current_offset += 1;
+					return false;
+				}
+
 				for (const child_node of node.childNodes) {
 					if (process_node(child_node)) return true; // Stop iteration if end found
 				}
@@ -1608,6 +1644,12 @@ ${fallback_html}`;
 					}
 					current_offset += node_length;
 				} else if (node.nodeType === Node.ELEMENT_NODE) {
+					if (node instanceof HTMLElement && node.dataset.type === 'inline-node') {
+						// An inline node holds no composable text and occupies exactly
+						// one model character, so step over it without descending.
+						current_offset += 1;
+						continue;
+					}
 					const position = get_dom_text_position(node, target_offset);
 					if (position) return position;
 				}
