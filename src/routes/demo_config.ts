@@ -15,7 +15,12 @@ import {
 } from 'svedit';
 import type { DocumentNode, HtmlPasteConfig } from 'svedit';
 import type { Component } from 'svelte';
-import { CycleLayoutCommand, CycleNodeTypeCommand, ToggleLinkCommand } from './commands.svelte.js';
+import {
+	CycleLayoutCommand,
+	CycleNodeTypeCommand,
+	InsertMentionCommand,
+	ToggleLinkCommand
+} from './commands.svelte.js';
 import { document_schema } from './demo_schema.js';
 import nanoid from './nanoid.js';
 
@@ -39,6 +44,7 @@ import Code from './components/Code.svelte';
 import Highlight from './components/Highlight.svelte';
 import Link from './components/Link.svelte';
 import Section from './components/Section.svelte';
+import Mention from './components/Mention.svelte';
 
 type NodeType = keyof typeof document_schema;
 type AnnotationNodeType = {
@@ -88,7 +94,8 @@ export const app_config = {
 		code: Code,
 		highlight: Highlight,
 		link: Link,
-		section: Section
+		section: Section,
+		mention: Mention
 		// NOTE: `marker` must not have a component: it is an annotation, so it
 		// is data-only and may overlap marks (e.g. a section) and other
 		// annotations. Covered node wrappers get `anno-marker` classes
@@ -407,6 +414,7 @@ export const app_config = {
 			toggle_code: new ToggleMarkCommand('code', context),
 			toggle_highlight: new ToggleMarkCommand('highlight', context),
 			toggle_link: new ToggleLinkCommand(context),
+			insert_mention: new InsertMentionCommand(context),
 			toggle_section: new ToggleMarkCommand('section', context),
 			// Annotations only compete with same-type annotations, so the
 			// marker toggle never conflicts with sections or other marks.
