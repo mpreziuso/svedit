@@ -219,3 +219,26 @@ export class ToggleLinkCommand extends Command {
 		}
 	}
 }
+
+/**
+ * Inserts a mention inline node at the caret.
+ *
+ * The document stores only a user id; the displayed name is resolved from
+ * the directory at render time, which is the point of an inline node.
+ */
+export class InsertMentionCommand extends Command {
+	is_enabled() {
+		const { session, editable } = this.context;
+		if (!editable) return false;
+		if (session.selection?.type !== 'text') return false;
+		if (!session.available_inline_types.includes('mention')) return false;
+		// An inline node cannot be inserted inside a mark, because marks are
+		// mutually exclusive and its own attachment would overlap.
+		return session.selected_marks.length === 0;
+	}
+
+	execute() {
+		const session = this.context.session;
+		session.apply(session.tr.insert_inline_node('mention', { user_id: 'michael' }));
+	}
+}
