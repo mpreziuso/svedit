@@ -233,8 +233,9 @@ export class InsertMentionCommand extends Command {
 		if (session.selection?.type !== 'text') return false;
 		if (!session.available_inline_types.includes('mention')) return false;
 		// An inline node cannot be inserted inside a mark, because marks are
-		// mutually exclusive and its own attachment would overlap.
-		return session.selected_marks.length === 0;
+		// mutually exclusive and its own attachment would overlap. Ask the
+		// session so the button and the transaction always agree.
+		return session.can_insert_inline_node;
 	}
 
 	execute() {

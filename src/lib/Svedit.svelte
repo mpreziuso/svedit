@@ -7,6 +7,7 @@
 		paths_equal,
 		serialize_path,
 		is_selection_collapsed,
+		get_dom_model_text,
 		strip_inline_node_placeholders
 	} from './utils.js';
 	import {
@@ -1660,7 +1661,12 @@ ${fallback_html}`;
 		if (!text_el) return;
 
 		const model_text = session.get(selection.path).content;
-		if ((text_el.textContent ?? '') === model_text) return;
+		// Read the DOM the way the model expresses it: an inline node stands for
+		// one placeholder character, not the text its component rendered. Using
+		// raw textContent here would never match once an inline node is present,
+		// so this early return would stop firing and the cleanup below would
+		// delete genuine text from the DOM.
+		if (get_dom_model_text(text_el) === model_text) return;
 
 		let current_offset = 0;
 		function get_dom_text_position(

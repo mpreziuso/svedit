@@ -24,6 +24,7 @@ import type {
 	NodeKind,
 	DocumentSchema,
 	Selection,
+	SelectionRange,
 	Attachment,
 	Mark,
 	Annotation,
@@ -405,10 +406,12 @@ function validate_marks_and_annotations(
 ): void {
 	// Inline node attachments live in `marks` so they inherit exclusivity and
 	// range adjustment, but they are declared in their own schema list.
-	const allowed_mark_types =
-		prop_def.mark_types || prop_def.inline_types
-			? [...(prop_def.mark_types ?? []), ...(prop_def.inline_types ?? [])]
-			: undefined;
+	// An absent or empty mark_types means "unrestricted" (validate_range_array
+	// skips the check), and declaring inline_types must not silently narrow
+	// that to inline nodes only.
+	const allowed_mark_types = prop_def.mark_types?.length
+		? [...prop_def.mark_types, ...(prop_def.inline_types ?? [])]
+		: undefined;
 
 	validate_range_array(
 		node_id,
@@ -894,6 +897,20 @@ export function can_switch_mark_type(
 		to_schema?.kind === 'mark' &&
 		Object.keys(from_schema.properties ?? {}).length === 0 &&
 		Object.keys(to_schema.properties ?? {}).length === 0
+	);
+}
+
+/**
+ * True when a mark strictly contains the given range.
+ *
+ * An inline node's own attachment cannot overlap another mark, because marks
+ * are mutually exclusive. A mark that merely touches or is fully covered by
+ * the range does not block an insertion: a covered mark is consumed by the
+ * deletion that precedes it.
+ */
+export function has_mark_containing_range(marks: Array<Mark>, range: SelectionRange): boolean {
+	return marks.some(
+		(mark) => mark.start_offset < range.start_offset && mark.end_offset > range.end_offset
 	);
 }
 

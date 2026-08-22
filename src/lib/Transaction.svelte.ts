@@ -8,6 +8,7 @@ import {
 	adjust_ranges_for_deletion,
 	adjust_ranges_for_insertion,
 	are_ranges_exclusive,
+	strip_orphaned_inline_placeholders,
 	INLINE_NODE_PLACEHOLDER
 } from './utils.js';
 import { join_text_node } from './transforms.svelte.js';
@@ -24,6 +25,7 @@ import {
 	is_id_valid,
 	fill_node_defaults,
 	can_switch_mark_type,
+	has_mark_containing_range,
 	get_selected_marks,
 	get_selected_annotations,
 	get_selected_range_types,
@@ -657,22 +659,26 @@ export default class Transaction {
 			return this;
 		}
 
-		if (!is_selection_collapsed(this.selection)) {
-			this.delete_selection();
-		}
-
-		// A mark that strictly contains the caret would end up overlapping the
-		// inline node's own mark, and marks must stay mutually exclusive. At a
-		// collapsed caret selected_marks is non-empty only for a strictly
-		// containing mark, which is exactly the case we must refuse.
-		if (this.selected_marks.length > 0) {
+		// Refuse BEFORE mutating anything. A mark that strictly contains the
+		// selection still contains the caret once the selection is deleted, so
+		// its range would overlap the inline node's own attachment — and marks
+		// must stay mutually exclusive. Checking after delete_selection would
+		// commit the deletion and then insert nothing, destroying the text.
+		// A mark merely covered by the selection is consumed by that deletion
+		// and does not block the insert.
+		const path = this.selection.path;
+		const selection_range = get_selection_range(this.selection)!;
+		if (has_mark_containing_range(this.get(path).marks, selection_range)) {
 			console.warn(
 				'Cannot insert an inline node inside an existing mark. Place the caret outside the mark instead.'
 			);
 			return this;
 		}
 
-		const path = this.selection.path;
+		if (!is_selection_collapsed(this.selection)) {
+			this.delete_selection();
+		}
+
 		const start_offset = (this.selection as TextSelection).anchor_offset;
 
 		this.insert_text(INLINE_NODE_PLACEHOLDER);
@@ -983,7 +989,7 @@ export default class Transaction {
 			...(text_property_definition.mark_types ?? []),
 			...(text_property_definition.inline_types ?? [])
 		];
-		const next_text = structuredClone(text_value);
+		let next_text = structuredClone(text_value);
 		let text_changed = false;
 
 		// Now we apply marks if there are any, but only if there's no active mark
@@ -1035,6 +1041,34 @@ export default class Transaction {
 				next_text.annotations = text_value.annotations.concat(restored_annotations);
 				text_changed = true;
 			}
+		}
+
+		// An inline node's placeholder is meaningless without its attachment: it
+		// renders as an invisible object-replacement character. If a pasted
+		// inline node could not be restored above — the property does not allow
+		// its type, or its attachment would overlap an existing mark — drop the
+		// placeholder with it rather than leaving it stranded in the content.
+		// Only a payload that carried attachments can orphan a placeholder. A
+		// bare insertion attaches its mark after this call returns (see
+		// insert_inline_node), so its placeholder must be left alone.
+		const stripped =
+			marks.length > 0
+				? strip_orphaned_inline_placeholders(
+						next_text,
+						range.start_offset,
+						range.start_offset + delta
+					)
+				: { text: next_text, removed_count: 0 };
+		if (stripped.removed_count > 0) {
+			next_text = stripped.text;
+			text_changed = true;
+			const caret = range.start_offset + delta - stripped.removed_count;
+			this.selection = {
+				type: 'text',
+				path: this.selection.path,
+				anchor_offset: caret,
+				focus_offset: caret
+			};
 		}
 
 		if (text_changed) {
