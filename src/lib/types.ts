@@ -625,9 +625,26 @@ export type MarkFragment = {
 };
 
 /**
+ * Represents an inline node in text content.
+ *
+ * Carries no `content`: the placeholder character the inline node occupies in
+ * the model is deliberately dropped at render time, which is what frees the
+ * component to render content of any length.
+ */
+export type InlineFragment = {
+	type: 'inline';
+	/** The payload node holding the inline node's data */
+	node: DocumentNode;
+	/** Index of the attachment in the marks array */
+	mark_index: number;
+	/** Character offset of the inline node in the content string */
+	start_offset: number;
+};
+
+/**
  * Represents a fragment of text content
  */
-export type Fragment = string | MarkFragment | SelectionHighlightFragment;
+export type Fragment = string | MarkFragment | InlineFragment | SelectionHighlightFragment;
 
 /**
  * Represents a node array fragment for plain nodes
