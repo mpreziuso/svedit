@@ -460,3 +460,31 @@ describe('selection mapping, model to DOM', () => {
 		expect(session.selection).toMatchObject({ anchor_offset: 3, focus_offset: 8 });
 	});
 });
+
+describe('clicking an inline node', () => {
+	it('selects its single character so selected_marks reports it', async () => {
+		const session = create_inline_session();
+		session.selection = {
+			type: 'text',
+			path: description_path,
+			anchor_offset: 5,
+			focus_offset: 5
+		};
+		session.apply(session.tr.insert_inline_node('mention', { user_id: 'johannes' }));
+		const { container } = render(SveditTest, { session });
+		await tick();
+
+		const inline_el = container.querySelector<HTMLElement>('[data-type="inline-node"]')!;
+		inline_el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+		await tick();
+
+		expect(session.selection).toMatchObject({
+			type: 'text',
+			path: ['page_1', 'body', 0, 'description'],
+			anchor_offset: 5,
+			focus_offset: 6
+		});
+		expect(session.selected_marks).toHaveLength(1);
+		expect(session.selected_marks[0].node.type).toBe('mention');
+	});
+});
