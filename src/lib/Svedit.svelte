@@ -6,7 +6,8 @@
 		deserialize_path,
 		paths_equal,
 		serialize_path,
-		is_selection_collapsed
+		is_selection_collapsed,
+		strip_inline_node_placeholders
 	} from './utils.js';
 	import {
 		normalize_line_endings,
@@ -395,7 +396,7 @@ ${fallback_html}`;
 			const property_definition = node_schema.properties[prop_name];
 			// Check if this is a text property.
 			if (property_definition.type === 'text') {
-				const text_content = prop_value.content;
+				const text_content = strip_inline_node_placeholders(prop_value.content);
 				if (text_content.trim()) {
 					html += `<p>${text_content}</p>`;
 				}
@@ -422,7 +423,7 @@ ${fallback_html}`;
 				prop_value !== null &&
 				typeof prop_value.content === 'string'
 			) {
-				const text_content = prop_value.content;
+				const text_content = strip_inline_node_placeholders(prop_value.content);
 				if (text_content.trim()) {
 					plain_text += `${text_content.trim()}\n\n`;
 				}
@@ -480,7 +481,7 @@ ${fallback_html}`;
 		if (session.selection?.type === 'text') {
 			plain_text = session.get_selected_plain_text();
 			text = session.get_selected_text();
-			const fallback_html = `<span>${text.content}</span>`;
+			const fallback_html = `<span>${strip_inline_node_placeholders(text.content)}</span>`;
 
 			// console.log('Text copy:', {
 			// 	text,

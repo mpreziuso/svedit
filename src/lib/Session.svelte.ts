@@ -1,5 +1,10 @@
 import Transaction from './Transaction.svelte.js';
-import { char_slice, traverse, traverse_ids } from './utils.js';
+import {
+	char_slice,
+	traverse,
+	traverse_ids,
+	strip_inline_node_placeholders
+} from './utils.js';
 import {
 	get as doc_get,
 	property_type as doc_property_type,
@@ -558,7 +563,9 @@ export default class Session<S extends DocumentSchema = DocumentSchema> {
 		const start = Math.min(this.selection.anchor_offset, this.selection.focus_offset);
 		const end = Math.max(this.selection.anchor_offset, this.selection.focus_offset);
 		const text: Text = this.get(this.selection.path);
-		return char_slice(text.content, start, end);
+		// Inline node placeholders are model-only: a bare U+FFFC pasted into
+		// another application renders as a replacement box.
+		return strip_inline_node_placeholders(char_slice(text.content, start, end));
 	}
 
 	get_selected_nodes(): NodeId[] | null {
