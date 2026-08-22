@@ -2,14 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { render } from 'vitest-browser-svelte';
 import { tick } from 'svelte';
 import SveditTest from './testing_components/SveditTest.svelte';
-import create_test_session from './create_test_session.js';
 import {
 	validate_document_schema,
 	validate_document,
 	validate_config_components
 } from '../lib/doc_utils.js';
 import { INLINE_NODE_PLACEHOLDER, get_dom_model_text } from '../lib/utils.js';
-import InlineChip from './testing_components/InlineChip.svelte';
+import create_inline_session from './create_inline_session.js';
 
 const description_path = ['story_1', 'description'];
 /**
@@ -19,26 +18,6 @@ const description_path = ['story_1', 'description'];
  * finds nothing.
  */
 const rendered_path = ['page_1', 'body', 0, 'description'];
-
-/**
- * A session whose story description accepts a `strong` mark and a `mention`
- * inline node. The shared schema and config objects are cloned so per-test
- * mutations cannot leak into other suites.
- */
-export function create_inline_session() {
-	const session = create_test_session();
-	session.schema = structuredClone(session.schema);
-	session.config = {
-		...session.config,
-		node_components: { ...session.config.node_components }
-	};
-	session.schema.strong = { kind: 'mark', properties: {} };
-	session.schema.mention = { kind: 'inline', properties: { user_id: { type: 'string' } } };
-	(session.schema.story.properties.description as any).mark_types = ['strong'];
-	(session.schema.story.properties.description as any).inline_types = ['mention'];
-	session.config.node_components.mention = InlineChip;
-	return session;
-}
 
 /** A document node graph carrying one mention in the story description. */
 function doc_with_mention(start_offset: number, end_offset: number) {

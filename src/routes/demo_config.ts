@@ -12,12 +12,7 @@ import {
 } from 'svedit';
 import type { DocumentNode } from 'svedit';
 import type { Component } from 'svelte';
-import {
-	CycleLayoutCommand,
-	CycleNodeTypeCommand,
-	InsertMentionCommand,
-	ToggleLinkCommand
-} from './commands.svelte.js';
+import { CycleLayoutCommand, CycleNodeTypeCommand, ToggleLinkCommand } from './commands.svelte.js';
 import { document_schema } from './demo_schema.js';
 import nanoid from './nanoid.js';
 
@@ -386,7 +381,6 @@ export const app_config = {
 			toggle_code: new ToggleMarkCommand('code', context),
 			toggle_highlight: new ToggleMarkCommand('highlight', context),
 			toggle_link: new ToggleLinkCommand(context),
-			insert_mention: new InsertMentionCommand(context),
 			toggle_section: new ToggleMarkCommand('section', context),
 			// Annotations only compete with same-type annotations, so the
 			// marker toggle never conflicts with sections or other marks.

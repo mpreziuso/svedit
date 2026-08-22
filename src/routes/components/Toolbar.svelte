@@ -357,18 +357,6 @@
 			<Icon name="link" />
 		</button>
 	{/if}
-	{#if session.commands.insert_mention}
-		<button
-			title="Insert mention"
-			onmousedown={(event) => {
-				event.preventDefault();
-				session.commands.insert_mention.execute();
-			}}
-			disabled={session.commands.insert_mention.disabled}
-		>
-			<Icon name="mention" />
-		</button>
-	{/if}
 {/snippet}
 
 <!-- Section marks and markers span whole nodes, so they belong to the node
